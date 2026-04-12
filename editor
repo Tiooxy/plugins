@@ -1,0 +1,792 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local Terrain = workspace.Terrain
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local camera = workspace.CurrentCamera
+
+local mapFolder = workspace:FindFirstChild("MyMapParts") or Instance.new("Folder")
+mapFolder.Name = "MyMapParts"
+mapFolder.Parent = workspace
+
+-- ==========================================
+-- 1. KONFIGURASI STATE UTAMA
+-- ==========================================
+local EditorState = {
+	Target = "None",
+	TerrainTool = "Create",
+	PartTool = "Select",
+	Shape = "Block",
+	TerrainShape = "Block", 
+	BrushSize = 8,
+	Thickness = 10,
+	SizeStep = 1,
+	Material = Enum.Material.Grass,
+	TerrainColor = Color3.fromRGB(85, 170, 127),
+	Transparency = 0,
+	Anchored = true,
+	CanCollide = true
+}
+
+local terrainCodes = {} 
+local modifiedColors = {} 
+local selectedParts = {} 
+local selectionBoxes = {} 
+
+-- ==========================================
+-- 2. PROCEDURAL CONE ISLAND GENERATOR
+-- ==========================================
+local function spawnConeIsland(centerPosition, radius, thickness, baseMaterial)
+	task.spawn(function()
+		local seed = tick() + math.random(1, 1000)
+		local STEP = math.clamp(math.floor(radius / 15), 2, 6) 
+		
+		local trueThick = math.max(0.1, thickness)
+		local SCALE_Y = math.clamp(trueThick / radius, 0.1, 5) 
+		local BATAS_ATAS = trueThick * 0.2
+		local BATAS_BAWAH = -trueThick * 0.8
+		
+		local KASAR = radius / 2
+		local NOISE_POWER = radius / 4
+		
+		local isAir = (baseMaterial == Enum.Material.Air)
+
+		for x = -radius, radius, STEP do
+			if x % (STEP * 5) == 0 then task.wait() end 
+			for y = BATAS_BAWAH, BATAS_ATAS, STEP do
+				for z = -radius, radius, STEP do
+					local pos = Vector3.new(x + centerPosition.X, y + centerPosition.Y, z + centerPosition.Z)
+					local offset = pos - centerPosition
+					local jarak = Vector3.new(offset.X, offset.Y * (1 / SCALE_Y), offset.Z).Magnitude
+					local noise = math.noise((x/KASAR) + seed, (y/KASAR) + seed, (z/KASAR) + seed) * NOISE_POWER
+
+					if jarak + noise <= radius then
+						local material = baseMaterial
+						if not isAir then
+							if y >= BATAS_ATAS - (STEP*1.5) then
+								material = baseMaterial
+							elseif y <= BATAS_BAWAH + (STEP*2.5) then
+								material = Enum.Material.Rock
+							else
+								material = math.random() > 0.5 and Enum.Material.Ground or Enum.Material.Rock
+							end
+						end
+						Terrain:FillBlock(CFrame.new(pos), Vector3.new(STEP, STEP, STEP), material)
+					end
+				end
+			end
+		end
+	end)
+end
+
+-- ==========================================
+-- 3. SISTEM 3D HANDLES 
+-- ==========================================
+local playerGui = player:WaitForChild("PlayerGui")
+
+local moveHandles = Instance.new("Handles", playerGui)
+moveHandles.Style = Enum.HandlesStyle.Movement; moveHandles.Color3 = Color3.fromRGB(255, 255, 255)
+local scaleHandles = Instance.new("Handles", playerGui)
+scaleHandles.Style = Enum.HandlesStyle.Resize; scaleHandles.Color3 = Color3.fromRGB(200, 200, 200)
+local rotHandles = Instance.new("ArcHandles", playerGui)
+rotHandles.Color3 = Color3.fromRGB(150, 150, 150)
+
+local initialStates = {}
+
+moveHandles.MouseButton1Down:Connect(function()
+	initialStates = {}
+	for _, p in ipairs(selectedParts) do initialStates[p] = p.CFrame end
+end)
+moveHandles.MouseDrag:Connect(function(face, dist)
+	local delta = Vector3.FromNormalId(face) * dist
+	for p, startCf in pairs(initialStates) do if p and p.Parent then p.CFrame = startCf + delta end end
+end)
+
+scaleHandles.MouseButton1Down:Connect(function()
+	initialStates = {}
+	for _, p in ipairs(selectedParts) do initialStates[p] = {cf = p.CFrame, sz = p.Size} end
+end)
+scaleHandles.MouseDrag:Connect(function(face, dist)
+	local axis = Vector3.FromNormalId(face)
+	for p, st in pairs(initialStates) do
+		if p and p.Parent then
+			local newSize = st.sz + Vector3.new(math.abs(axis.X), math.abs(axis.Y), math.abs(axis.Z)) * dist
+			if newSize.X > 0.5 and newSize.Y > 0.5 and newSize.Z > 0.5 then p.Size = newSize; p.CFrame = st.cf * CFrame.new(axis * dist / 2) end
+		end
+	end
+end)
+
+rotHandles.MouseButton1Down:Connect(function()
+	initialStates = {}
+	for _, p in ipairs(selectedParts) do initialStates[p] = p.CFrame end
+end)
+rotHandles.MouseDrag:Connect(function(axis, angle)
+	for p, startCf in pairs(initialStates) do
+		if p and p.Parent then p.CFrame = startCf * CFrame.fromAxisAngle(Vector3.FromAxis(axis), angle) end
+	end
+end)
+
+local function updateSelectionVisuals()
+	for _, box in pairs(selectionBoxes) do box:Destroy() end
+	selectionBoxes = {}
+	for _, p in ipairs(selectedParts) do
+		if p and p.Parent then
+			local box = Instance.new("SelectionBox", playerGui)
+			box.Color3 = Color3.fromRGB(255, 255, 255); box.LineThickness = 0.05; box.Adornee = p
+			table.insert(selectionBoxes, box)
+		end
+	end
+	moveHandles.Adornee = nil; scaleHandles.Adornee = nil; rotHandles.Adornee = nil
+	local primaryPart = selectedParts[#selectedParts]
+	if primaryPart and EditorState.Target == "Part" then
+		if EditorState.PartTool == "Move" then moveHandles.Adornee = primaryPart
+		elseif EditorState.PartTool == "Scale" then scaleHandles.Adornee = primaryPart
+		elseif EditorState.PartTool == "Rotate" then rotHandles.Adornee = primaryPart end
+	end
+end
+
+-- ==========================================
+-- 4. UI LANDSCAPE SYSTEM
+-- ==========================================
+local screenGui = Instance.new("ScreenGui", playerGui)
+screenGui.Name = "ProStudioClean"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+
+local dragBox = Instance.new("Frame", screenGui)
+dragBox.BackgroundColor3 = Color3.fromRGB(0, 150, 255); dragBox.BackgroundTransparency = 0.7
+dragBox.BorderSizePixel = 1; dragBox.BorderColor3 = Color3.fromRGB(255, 255, 255)
+dragBox.Visible = false; dragBox.ZIndex = 9999
+
+local function applyTheme(uiElement, isButton, isTransparentLabel, customRadius)
+	if isTransparentLabel then uiElement.BackgroundTransparency = 1 else
+		uiElement.BackgroundColor3 = Color3.fromRGB(30, 30, 35) 
+		local corner = Instance.new("UICorner", uiElement); corner.CornerRadius = UDim.new(0, customRadius or 30) 
+	end
+	if uiElement:IsA("TextLabel") or uiElement:IsA("TextButton") or uiElement:IsA("TextBox") then
+		uiElement.TextColor3 = Color3.fromRGB(255, 255, 255); uiElement.Font = Enum.Font.GothamBold; uiElement.TextSize = 11 
+	end
+	if isButton then uiElement.AutoButtonColor = true end
+end
+
+-- TOGGLE BUTTON
+local toggleIcon = Instance.new("TextButton", screenGui)
+toggleIcon.Name = "EditorToggle"
+toggleIcon.Size = UDim2.new(0, 42, 0, 50)
+toggleIcon.Position = UDim2.new(0, 200, 0, 0)
+toggleIcon.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+topBarToggle.BackgroundTransparency = 0
+topBarToggle.BorderColor3 = Color3.fromRGB(255, 0, 0)
+toggleIcon.Text = ""
+
+local iconImg = Instance.new("ImageLabel", toggleIcon)
+iconImg.Size = UDim2.new(0, 24, 0, 24)
+iconImg.Position = UDim2.new(0.5, -12, 0, 6)
+iconImg.BackgroundTransparency = 1
+iconImg.Image = "rbxassetid://6026568198" 
+
+local labelText = Instance.new("TextLabel", toggleIcon)
+labelText.Size = UDim2.new(1, 0, 0, 15)
+labelText.Position = UDim2.new(0, 0, 1, -18)
+labelText.BackgroundTransparency = 1
+labelText.Text = "Editor"
+labelText.TextSize = 9
+labelText.Font = Enum.Font.SourceSansBold
+labelText.TextColor3 = Color3.new(0,0,0)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        local target = playerGui:FindFirstChild("GridToggle", true) or playerGui:FindFirstChild("toolbox", true) or playerGui:FindFirstChild("Rotate", true)
+        if target and target:IsA("GuiObject") then
+            toggleIcon.Parent = target.Parent
+            toggleIcon.Position = UDim2.new(0, target.Position.X.Offset + 46, 0, target.Position.Y.Offset)
+            break
+        end
+    end
+end)
+
+local mainFrame = Instance.new("Frame", screenGui)
+mainFrame.Size = UDim2.new(0, 660, 0, 330); mainFrame.Position = UDim2.new(0.5, -330, 0.5, -165)
+mainFrame.Visible = false; mainFrame.Active = true
+applyTheme(mainFrame, false, false, 15); mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18) 
+
+local titleFrame = Instance.new("Frame", mainFrame)
+titleFrame.Size = UDim2.new(1, 0, 0, 30); titleFrame.BackgroundTransparency = 1
+local titleText = Instance.new("TextLabel", titleFrame)
+titleText.Size = UDim2.new(1, -20, 1, 0); titleText.Position = UDim2.new(0, 15, 0, 0)
+titleText.Text = "STUDIO LITE EDITOR - by Tio"
+titleText.TextXAlignment = Enum.TextXAlignment.Left; applyTheme(titleText, false, true)
+
+local col1 = Instance.new("Frame", mainFrame); col1.Size = UDim2.new(0, 110, 0, 280); col1.Position = UDim2.new(0, 15, 0, 35); col1.BackgroundTransparency = 1
+local col2 = Instance.new("Frame", mainFrame); col2.Size = UDim2.new(0, 120, 0, 280); col2.Position = UDim2.new(0, 145, 0, 35); col2.BackgroundTransparency = 1
+local col3 = Instance.new("Frame", mainFrame); col3.Size = UDim2.new(0, 160, 0, 280); col3.Position = UDim2.new(0, 285, 0, 35); col3.BackgroundTransparency = 1
+local col4 = Instance.new("Frame", mainFrame); col4.Size = UDim2.new(0, 180, 0, 280); col4.Position = UDim2.new(0, 465, 0, 35); col4.BackgroundTransparency = 1
+
+local function createDivider(posX)
+	local line = Instance.new("Frame", mainFrame); line.Size = UDim2.new(0, 1, 1, -50); line.Position = UDim2.new(0, posX, 0, 40)
+	line.BackgroundColor3 = Color3.fromRGB(50, 50, 55); line.BackgroundTransparency = 0; line.BorderSizePixel = 0
+end
+createDivider(135); createDivider(275); createDivider(455)
+
+local function createVerticalList(parent, padding)
+	local list = Instance.new("UIListLayout", parent); list.FillDirection = Enum.FillDirection.Vertical; list.Padding = UDim.new(0, padding or 6); list.SortOrder = Enum.SortOrder.LayoutOrder
+end
+createVerticalList(col1); createVerticalList(col2); createVerticalList(col4)
+
+local function makeBtn(text, parent)
+	local b = Instance.new("TextButton", parent); b.Size = UDim2.new(1, 0, 0, 26); b.Text = text; applyTheme(b, true, false); return b
+end
+local function makeLabel(text, parent)
+	local l = Instance.new("TextLabel", parent); l.Size = UDim2.new(1, 0, 0, 20); l.Text = text; l.TextXAlignment = Enum.TextXAlignment.Center; applyTheme(l, false, true); return l
+end
+
+-- KOLOM 1: TARGET
+makeLabel("TARGET", col1)
+local tabNone = makeBtn("NONE", col1); tabNone.BackgroundColor3 = Color3.fromRGB(200, 200, 200); tabNone.TextColor3 = Color3.fromRGB(0,0,0)
+local tabTerrain = makeBtn("TERRAIN", col1); local tabPart = makeBtn("PART", col1)
+
+-- KOLOM 2: TOOLS
+makeLabel("TOOLS", col2)
+local toolsScroll = Instance.new("ScrollingFrame", col2)
+toolsScroll.Size = UDim2.new(1, 0, 0, 240); toolsScroll.BackgroundTransparency = 1; toolsScroll.ScrollBarThickness = 3; toolsScroll.BorderSizePixel = 0; toolsScroll.CanvasSize = UDim2.new(0, 0, 0, 0) 
+local toolScrollList = Instance.new("UIListLayout", toolsScroll); toolScrollList.Padding = UDim.new(0, 6); toolScrollList.SortOrder = Enum.SortOrder.LayoutOrder
+
+local tToolsFrame = Instance.new("Frame", toolsScroll); tToolsFrame.Size = UDim2.new(1,0,0,130); tToolsFrame.BackgroundTransparency=1; tToolsFrame.Visible=false; createVerticalList(tToolsFrame)
+local pToolsFrame = Instance.new("Frame", toolsScroll); pToolsFrame.Size = UDim2.new(1,0,0,300); pToolsFrame.BackgroundTransparency=1; pToolsFrame.Visible=false; createVerticalList(pToolsFrame)
+
+local tCreateBtn = makeBtn("Create", tToolsFrame); tCreateBtn.BackgroundColor3 = Color3.fromRGB(200, 200, 200); tCreateBtn.TextColor3 = Color3.fromRGB(0,0,0)
+local tEraseBtn = makeBtn("Erase", tToolsFrame); local tIslandBtn = makeBtn("Create Island", tToolsFrame); local tClearBtn = makeBtn("Clear Terrain", tToolsFrame)
+
+local pCreateBtn = makeBtn("Create", pToolsFrame)
+local pSelectBtn = makeBtn("Select", pToolsFrame); pSelectBtn.BackgroundColor3 = Color3.fromRGB(200, 200, 200); pSelectBtn.TextColor3 = Color3.fromRGB(0,0,0)
+local pMoveBtn = makeBtn("Move", pToolsFrame); local pScaleBtn = makeBtn("Scale", pToolsFrame); local pRotateBtn = makeBtn("Rotate", pToolsFrame)
+local pDupBtn = makeBtn("Duplicate", pToolsFrame); local pToTerrainBtn = makeBtn("Fill part", pToolsFrame) 
+local pDelBtn = makeBtn("Delete", pToolsFrame); local pClearBtn = makeBtn("Clear All Parts", pToolsFrame)
+
+local function updateToolsCanvas()
+	if EditorState.Target == "Terrain" then toolsScroll.CanvasSize = UDim2.new(0, 0, 0, 140)
+	elseif EditorState.Target == "Part" then toolsScroll.CanvasSize = UDim2.new(0, 0, 0, 300)
+	else toolsScroll.CanvasSize = UDim2.new(0, 0, 0, 0) end
+end
+
+-- KOLOM 3: PROPERTIES
+makeLabel("PROPERTIES", col3)
+local propsScroll = Instance.new("ScrollingFrame", col3)
+propsScroll.Size = UDim2.new(1, 0, 0, 240); propsScroll.Position = UDim2.new(0,0,0,26); propsScroll.BackgroundTransparency = 1; propsScroll.ScrollBarThickness = 3; propsScroll.BorderSizePixel = 0; createVerticalList(propsScroll, 6)
+
+local function createDropdown(title, items, parent)
+	local mainBtn = makeBtn(title .. ": " .. items[1].Name, parent)
+	local dropFrame = Instance.new("ScrollingFrame", mainBtn)
+	dropFrame.Size = UDim2.new(1, 0, 0, 100); dropFrame.Position = UDim2.new(0, 0, 1, 5); dropFrame.Visible = false; dropFrame.ZIndex = 100; dropFrame.CanvasSize = UDim2.new(0, 0, 0, #items * 28); dropFrame.ScrollBarThickness = 2
+	applyTheme(dropFrame, false, false, 10); local list = Instance.new("UIListLayout", dropFrame); list.SortOrder = Enum.SortOrder.LayoutOrder
+	mainBtn.MouseButton1Click:Connect(function() dropFrame.Visible = not dropFrame.Visible end)
+	for i, item in ipairs(items) do
+		local b = Instance.new("TextButton", dropFrame); b.Size = UDim2.new(1, 0, 0, 28); b.Text = item.Name; b.LayoutOrder = i; b.ZIndex = 101; b.BackgroundTransparency = 1; applyTheme(b, true, true)
+		b.MouseButton1Click:Connect(function()
+			mainBtn.Text = title .. ": " .. item.Name; dropFrame.Visible = false
+			if item.Mat then EditorState.Material = item.Mat end
+			if item.Shape then EditorState.Shape = item.Shape end
+			if item.TShape then EditorState.TerrainShape = item.TShape end
+		end)
+	end return mainBtn
+end
+
+local matList = {{Name="Grass", Mat=Enum.Material.Grass}, {Name="Ground", Mat=Enum.Material.Ground}, {Name="Paving", Mat=Enum.Material.Pavement}, {Name="Water", Mat=Enum.Material.Water}, {Name="Asphalt", Mat=Enum.Material.Asphalt}, {Name="Rock", Mat=Enum.Material.Rock}, {Name="Wood", Mat=Enum.Material.Wood}, {Name="Ice", Mat=Enum.Material.Ice}, {Name="Sand", Mat=Enum.Material.Sand}, {Name="Mud", Mat=Enum.Material.Mud}, {Name="Neon", Mat=Enum.Material.Neon}}
+local shapeList = {{Name="Block", Shape="Block"}, {Name="Ball", Shape="Ball"}, {Name="Cylinder", Shape="Cylinder"}, {Name="Wedge", Shape="Wedge"}, {Name="CornerWedge", Shape="CornerWedge"}}
+local terrainShapeList = {{Name="Kotak", TShape="Block"}, {Name="Bulat", TShape="Ball"}, {Name="Kerucut", TShape="Cone"}}
+
+local sharedProps = Instance.new("Frame", propsScroll); sharedProps.Size = UDim2.new(1,0,0,90); sharedProps.BackgroundTransparency=1; createVerticalList(sharedProps, 6)
+local terrainProps = Instance.new("Frame", propsScroll); terrainProps.Size = UDim2.new(1,0,0,200); terrainProps.BackgroundTransparency=1; terrainProps.Visible=false; createVerticalList(terrainProps, 6)
+local partProps = Instance.new("Frame", propsScroll); partProps.Size = UDim2.new(1,0,0,220); partProps.BackgroundTransparency=1; partProps.Visible=false; createVerticalList(partProps, 6)
+
+local matDrop = createDropdown("Material", matList, sharedProps)
+
+local sizeControl = Instance.new("Frame", sharedProps); sizeControl.Size = UDim2.new(1,0,0,26); sizeControl.BackgroundTransparency=1
+local btnMinus = makeBtn("-", sizeControl); btnMinus.Size = UDim2.new(0.2,0,1,0)
+local sizeBox = Instance.new("TextBox", sizeControl); sizeBox.Size = UDim2.new(0.56,0,1,0); sizeBox.Position = UDim2.new(0.22,0,0,0)
+sizeBox.Text = "Size: 8"; sizeBox.ClearTextOnFocus = false; applyTheme(sizeBox, false, false, 30)
+local btnPlus = makeBtn("+", sizeControl); btnPlus.Size = UDim2.new(0.2,0,1,0); btnPlus.Position = UDim2.new(0.8,0,0,0)
+
+local multiControl = Instance.new("Frame", sharedProps); multiControl.Size = UDim2.new(1,0,0,26); multiControl.BackgroundTransparency=1
+local btn1x = makeBtn("1x", multiControl); btn1x.Size = UDim2.new(0.18,0,1,0)
+local btn2x = makeBtn("2x", multiControl); btn2x.Size = UDim2.new(0.18,0,1,0); btn2x.Position = UDim2.new(0.205,0,0,0)
+local btn4x = makeBtn("4x", multiControl); btn4x.Size = UDim2.new(0.18,0,1,0); btn4x.Position = UDim2.new(0.41,0,0,0)
+local btn8x = makeBtn("8x", multiControl); btn8x.Size = UDim2.new(0.18,0,1,0); btn8x.Position = UDim2.new(0.615,0,0,0)
+local btn10x = makeBtn("10x", multiControl); btn10x.Size = UDim2.new(0.18,0,1,0); btn10x.Position = UDim2.new(0.82,0,0,0)
+
+local terShapeDrop = createDropdown("Bentuk", terrainShapeList, terrainProps) 
+
+local thickControl = Instance.new("Frame", terrainProps); thickControl.Size = UDim2.new(1,0,0,26); thickControl.BackgroundTransparency=1
+local thkMinus = makeBtn("-", thickControl); thkMinus.Size = UDim2.new(0.2,0,1,0)
+local thkBox = Instance.new("TextBox", thickControl); thkBox.Size = UDim2.new(0.56,0,1,0); thkBox.Position = UDim2.new(0.22,0,0,0)
+thkBox.Text = "Thick: 10"; thkBox.ClearTextOnFocus = false; applyTheme(thkBox, false, false, 30)
+local thkPlus = makeBtn("+", thickControl); thkPlus.Size = UDim2.new(0.2,0,1,0); thkPlus.Position = UDim2.new(0.8,0,0,0)
+
+local previewFrame = Instance.new("Frame", terrainProps); previewFrame.Size = UDim2.new(1,0,0,26); applyTheme(previewFrame, false, false, 6)
+local previewInner = Instance.new("Frame", previewFrame); previewInner.Size = UDim2.new(1,-6,1,-6); previewInner.Position = UDim2.new(0,3,0,3); previewInner.BackgroundColor3 = EditorState.TerrainColor
+Instance.new("UICorner", previewInner).CornerRadius = UDim.new(0,4)
+
+local templateRow = Instance.new("Frame", terrainProps); templateRow.Size = UDim2.new(1,0,0,20); templateRow.BackgroundTransparency=1
+local tLayout = Instance.new("UIListLayout", templateRow); tLayout.FillDirection = Enum.FillDirection.Horizontal; tLayout.Padding = UDim.new(0, 4)
+
+local function createSlider(name, parent, defaultVal, fillCol, callback)
+	local container = Instance.new("Frame", parent); container.Size = UDim2.new(1, 0, 0, 20); container.BackgroundTransparency = 1
+	local lbl = Instance.new("TextLabel", container); lbl.Size = UDim2.new(0.25, 0, 1, 0); lbl.BackgroundTransparency = 1
+	lbl.Text = name..":"..defaultVal; lbl.TextColor3 = Color3.fromRGB(255,255,255); lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 10; lbl.TextXAlignment = Enum.TextXAlignment.Left
+	local slideBg = Instance.new("TextButton", container); slideBg.Size = UDim2.new(0.75, 0, 0.6, 0); slideBg.Position = UDim2.new(0.25, 0, 0.2, 0); slideBg.Text = ""
+	applyTheme(slideBg, false, false, 4)
+	local fill = Instance.new("Frame", slideBg); fill.Size = UDim2.new(defaultVal/255, 0, 1, 0); fill.BackgroundColor3 = fillCol; fill.BorderSizePixel = 0
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+	
+	local dragging = false
+	local function update(input)
+		local pct = math.clamp((input.Position.X - slideBg.AbsolutePosition.X) / slideBg.AbsoluteSize.X, 0, 1); fill.Size = UDim2.new(pct, 0, 1, 0)
+		local val = math.floor(pct * 255); lbl.Text = name..":"..val; callback(val)
+	end
+	slideBg.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = true; update(input) end end)
+	UserInputService.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then update(input) end end)
+	UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
+	return function(v) fill.Size = UDim2.new(v/255, 0, 1, 0); lbl.Text = name..":"..math.floor(v) end
+end
+
+local setR, setG, setB
+local function applyColorChange()
+	Terrain:SetMaterialColor(EditorState.Material, EditorState.TerrainColor); previewInner.BackgroundColor3 = EditorState.TerrainColor; modifiedColors[EditorState.Material] = EditorState.TerrainColor
+end
+
+setR = createSlider("R", terrainProps, 85, Color3.fromRGB(255,80,80), function(v) EditorState.TerrainColor = Color3.fromRGB(v, EditorState.TerrainColor.G*255, EditorState.TerrainColor.B*255); applyColorChange() end)
+setG = createSlider("G", terrainProps, 170, Color3.fromRGB(80,255,80), function(v) EditorState.TerrainColor = Color3.fromRGB(EditorState.TerrainColor.R*255, v, EditorState.TerrainColor.B*255); applyColorChange() end)
+setB = createSlider("B", terrainProps, 127, Color3.fromRGB(80,180,255), function(v) EditorState.TerrainColor = Color3.fromRGB(EditorState.TerrainColor.R*255, EditorState.TerrainColor.G*255, v); applyColorChange() end)
+
+local function makeTemplate(col)
+	local b = Instance.new("TextButton", templateRow); b.Size = UDim2.new(0, 30, 1, 0); b.BackgroundColor3 = col; b.Text = ""; Instance.new("UICorner", b).CornerRadius = UDim.new(0,4)
+	b.MouseButton1Click:Connect(function() EditorState.TerrainColor = col; setR(col.R*255); setG(col.G*255); setB(col.B*255); applyColorChange() end)
+end
+makeTemplate(Color3.fromRGB(85, 170, 127)); makeTemplate(Color3.fromRGB(180, 120, 50)); makeTemplate(Color3.fromRGB(255, 255, 255)); makeTemplate(Color3.fromRGB(60, 45, 30))
+
+matDrop.MouseButton1Click:Connect(function()
+	task.wait(0.1); local c = Terrain:GetMaterialColor(EditorState.Material); EditorState.TerrainColor = c; setR(c.R*255); setG(c.G*255); setB(c.B*255); previewInner.BackgroundColor3 = c
+end)
+
+local shapeDrop = createDropdown("Shape", shapeList, partProps)
+local axisLabels = {}
+local function createActionAxis(axisName, parent)
+	local frame = Instance.new("Frame", parent); frame.Size = UDim2.new(1,0,0,26); frame.BackgroundTransparency=1
+	local btnMinus = makeBtn("-", frame); btnMinus.Size = UDim2.new(0.2,0,1,0)
+	local lbl = makeBtn(axisName .. " (Move)", frame); lbl.Size = UDim2.new(0.56,0,1,0); lbl.Position = UDim2.new(0.22,0,0,0)
+	local btnPlus = makeBtn("+", frame); btnPlus.Size = UDim2.new(0.2,0,1,0); btnPlus.Position = UDim2.new(0.8,0,0,0)
+	table.insert(axisLabels, {Label = lbl, Axis = axisName})
+	
+	local function doAction(sign)
+		local step = EditorState.SizeStep * sign; local tool = EditorState.PartTool
+		if tool == "Select" or tool == "Create" then tool = "Move" end
+		for _, p in ipairs(selectedParts) do
+			if p and p.Parent then
+				if tool == "Move" then p.Position = p.Position + Vector3.new(axisName=="X" and step or 0, axisName=="Y" and step or 0, axisName=="Z" and step or 0)
+				elseif tool == "Scale" then local newS = p.Size + Vector3.new(axisName=="X" and step or 0, axisName=="Y" and step or 0, axisName=="Z" and step or 0); p.Size = Vector3.new(math.max(0.05, newS.X), math.max(0.05, newS.Y), math.max(0.05, newS.Z))
+				elseif tool == "Rotate" then
+					local deg = EditorState.SizeStep == 10 and 90 or EditorState.SizeStep == 8 and 45 or EditorState.SizeStep == 4 and 15 or EditorState.SizeStep == 2 and 5 or 1
+					deg = deg * sign; p.CFrame = p.CFrame * CFrame.Angles(axisName=="X" and math.rad(deg) or 0, axisName=="Y" and math.rad(deg) or 0, axisName=="Z" and math.rad(deg) or 0)
+				end
+			end
+		end
+	end
+	btnMinus.MouseButton1Click:Connect(function() doAction(-1) end); btnPlus.MouseButton1Click:Connect(function() doAction(1) end)
+end
+createActionAxis("X", partProps); createActionAxis("Y", partProps); createActionAxis("Z", partProps)
+
+local transControl = Instance.new("Frame", partProps); transControl.Size = UDim2.new(1,0,0,26); transControl.BackgroundTransparency=1
+local transMinus = makeBtn("-", transControl); transMinus.Size = UDim2.new(0.2,0,1,0)
+local transLbl = makeBtn("Trans: 0", transControl); transLbl.Size = UDim2.new(0.56,0,1,0); transLbl.Position = UDim2.new(0.22,0,0,0)
+local transPlus = makeBtn("+", transControl); transPlus.Size = UDim2.new(0.2,0,1,0); transPlus.Position = UDim2.new(0.8,0,0,0)
+local anchorBtn = makeBtn("Anchored: ON", partProps); local collideBtn = makeBtn("Collide: ON", partProps)
+
+-- KOLOM 4: SYSTEM 
+makeLabel("SYSTEM", col4)
+
+local exitBtn = makeBtn("EXIT EDITOR", col4)
+exitBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50) 
+
+exitBtn.MouseButton1Click:Connect(function()
+	if moveHandles then moveHandles:Destroy() end
+	if scaleHandles then scaleHandles:Destroy() end
+	if rotHandles then rotHandles:Destroy() end
+	
+	for _, box in pairs(selectionBoxes) do
+		if box then box:Destroy() end
+	end
+	selectionBoxes = {}
+	selectedParts = {}
+	
+	if screenGui then
+		screenGui:Destroy()
+	end
+	
+	print("[Studio Lite] Editor berhasil ditutup dan dibersihkan.")
+end)
+
+local generateBtn = makeBtn("GENERATE SCRIPT", col4)
+local saveBtn = makeBtn("SAVE & RESET SCRIPT", col4) 
+saveBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 80) 
+
+local outputScroll = Instance.new("ScrollingFrame", col4)
+outputScroll.Size = UDim2.new(1, 0, 0, 140); outputScroll.CanvasSize = UDim2.new(0, 0, 0, 500)
+outputScroll.ScrollBarThickness = 4; outputScroll.BorderSizePixel = 0; applyTheme(outputScroll, false, false, 5) 
+
+local outputBox = Instance.new("TextBox", outputScroll)
+outputBox.Size = UDim2.new(1, -8, 1, 0); outputBox.BackgroundTransparency = 1; outputBox.Text = "-- Script Here"
+outputBox.TextXAlignment = Enum.TextXAlignment.Left; outputBox.TextYAlignment = Enum.TextYAlignment.Top
+outputBox.MultiLine = true; outputBox.ClearTextOnFocus = false; outputBox.TextWrapped = true; outputBox.TextSize = 10; outputBox.Font = Enum.Font.Code; outputBox.TextColor3 = Color3.fromRGB(100, 255, 100)
+
+outputBox:GetPropertyChangedSignal("TextBounds"):Connect(function()
+	local newH = math.max(140, outputBox.TextBounds.Y + 30)
+	outputBox.Size = UDim2.new(1, -8, 0, newH); outputScroll.CanvasSize = UDim2.new(0, 0, 0, newH)
+end)
+
+-- ==========================================
+-- 4. LOGIKA TOMBOL & TOOLS 
+-- ==========================================
+local function setActiveTheme(btn) btn.BackgroundColor3 = Color3.fromRGB(200, 200, 200); btn.TextColor3 = Color3.fromRGB(0, 0, 0) end
+local function setInactiveTheme(btn) btn.BackgroundColor3 = Color3.fromRGB(30, 30, 35); btn.TextColor3 = Color3.fromRGB(255, 255, 255) end
+
+local function updatePropsCanvas()
+	if EditorState.Target == "Terrain" then propsScroll.CanvasSize = UDim2.new(0,0,0, 290) 
+	elseif EditorState.Target == "Part" then propsScroll.CanvasSize = UDim2.new(0,0,0, 350)
+	else propsScroll.CanvasSize = UDim2.new(0,0,0, 0) end
+end
+
+local function resetTabs()
+	setInactiveTheme(tabNone); setInactiveTheme(tabTerrain); setInactiveTheme(tabPart)
+	tToolsFrame.Visible = false; pToolsFrame.Visible = false
+	terrainProps.Visible = false; partProps.Visible = false; sharedProps.Visible = false
+	selectedParts = {}; updateSelectionVisuals(); updateToolsCanvas(); updatePropsCanvas()
+end
+
+tabNone.MouseButton1Click:Connect(function() EditorState.Target = "None"; resetTabs(); setActiveTheme(tabNone) end)
+tabTerrain.MouseButton1Click:Connect(function() 
+	EditorState.Target = "Terrain"; resetTabs(); setActiveTheme(tabTerrain); 
+	tToolsFrame.Visible = true; sharedProps.Visible = true; terrainProps.Visible = true; 
+	updateToolsCanvas(); updatePropsCanvas() 
+end)
+tabPart.MouseButton1Click:Connect(function() 
+	EditorState.Target = "Part"; resetTabs(); setActiveTheme(tabPart); 
+	pToolsFrame.Visible = true; sharedProps.Visible = true; partProps.Visible = true; 
+	updateToolsCanvas(); updatePropsCanvas() 
+end)
+
+local tToolsList = {tCreateBtn, tEraseBtn, tIslandBtn}
+tCreateBtn.MouseButton1Click:Connect(function() EditorState.TerrainTool="Create"; for _,b in ipairs(tToolsList) do setInactiveTheme(b) end; setActiveTheme(tCreateBtn) end)
+tEraseBtn.MouseButton1Click:Connect(function() EditorState.TerrainTool="Erase"; for _,b in ipairs(tToolsList) do setInactiveTheme(b) end; setActiveTheme(tEraseBtn) end)
+tIslandBtn.MouseButton1Click:Connect(function() EditorState.TerrainTool="Island"; for _,b in ipairs(tToolsList) do setInactiveTheme(b) end; setActiveTheme(tIslandBtn) end)
+
+local pToolsList = {pCreateBtn, pSelectBtn, pMoveBtn, pScaleBtn, pRotateBtn}
+local function setPTool(t, btn) 
+	EditorState.PartTool=t; 
+	for _,b in ipairs(pToolsList) do setInactiveTheme(b) end; 
+	setActiveTheme(btn); updateSelectionVisuals() 
+	
+	local actionName = t
+	if t == "Select" or t == "Create" then actionName = "Move" end 
+	for _, item in ipairs(axisLabels) do item.Label.Text = item.Axis .. " (" .. actionName .. ")" end
+end
+pCreateBtn.MouseButton1Click:Connect(function() setPTool("Create", pCreateBtn) end)
+pSelectBtn.MouseButton1Click:Connect(function() setPTool("Select", pSelectBtn) end)
+pMoveBtn.MouseButton1Click:Connect(function() setPTool("Move", pMoveBtn) end)
+pScaleBtn.MouseButton1Click:Connect(function() setPTool("Scale", pScaleBtn) end)
+pRotateBtn.MouseButton1Click:Connect(function() setPTool("Rotate", pRotateBtn) end)
+
+local stepBtns = {btn1x, btn2x, btn4x, btn8x, btn10x}
+local function setSizeStep(val, btn) EditorState.SizeStep = val; for _, b in ipairs(stepBtns) do setInactiveTheme(b) end; setActiveTheme(btn) end
+btn1x.MouseButton1Click:Connect(function() setSizeStep(1, btn1x) end); btn2x.MouseButton1Click:Connect(function() setSizeStep(2, btn2x) end); btn4x.MouseButton1Click:Connect(function() setSizeStep(4, btn4x) end); btn8x.MouseButton1Click:Connect(function() setSizeStep(8, btn8x) end); btn10x.MouseButton1Click:Connect(function() setSizeStep(10, btn10x) end); setActiveTheme(btn1x) 
+
+local function updateSizeUI() sizeBox.Text = "Size: " .. EditorState.BrushSize end
+btnMinus.MouseButton1Click:Connect(function() EditorState.BrushSize = math.max(0.1, EditorState.BrushSize - EditorState.SizeStep); updateSizeUI() end)
+btnPlus.MouseButton1Click:Connect(function() EditorState.BrushSize = math.min(1024, EditorState.BrushSize + EditorState.SizeStep); updateSizeUI() end)
+
+sizeBox.FocusLost:Connect(function()
+	local numStr = sizeBox.Text:match("[%d%.]+")
+	if numStr then EditorState.BrushSize = math.clamp(tonumber(numStr) or 8, 0.1, 1024) end
+	updateSizeUI() 
+end)
+
+local function updateThickUI() thkBox.Text = "Thick: " .. EditorState.Thickness end
+thkMinus.MouseButton1Click:Connect(function() EditorState.Thickness = math.max(0.1, EditorState.Thickness - EditorState.SizeStep); updateThickUI() end)
+thkPlus.MouseButton1Click:Connect(function() EditorState.Thickness = math.min(500, EditorState.Thickness + EditorState.SizeStep); updateThickUI() end)
+
+thkBox.FocusLost:Connect(function()
+	local numStr = thkBox.Text:match("[%d%.]+")
+	if numStr then EditorState.Thickness = math.clamp(tonumber(numStr) or 10, 0.1, 500) end
+	updateThickUI() 
+end)
+
+transMinus.MouseButton1Click:Connect(function() 
+	EditorState.Transparency = math.clamp(EditorState.Transparency - 0.1, 0, 1); EditorState.Transparency = math.floor(EditorState.Transparency * 10 + 0.5) / 10; transLbl.Text = "Trans: " .. EditorState.Transparency
+	for _, p in ipairs(selectedParts) do if p and p.Parent then p.Transparency = EditorState.Transparency end end
+end)
+transPlus.MouseButton1Click:Connect(function() 
+	EditorState.Transparency = math.clamp(EditorState.Transparency + 0.1, 0, 1); EditorState.Transparency = math.floor(EditorState.Transparency * 10 + 0.5) / 10; transLbl.Text = "Trans: " .. EditorState.Transparency
+	for _, p in ipairs(selectedParts) do if p and p.Parent then p.Transparency = EditorState.Transparency end end
+end)
+anchorBtn.MouseButton1Click:Connect(function() EditorState.Anchored = not EditorState.Anchored; anchorBtn.Text = "Anchored: " .. (EditorState.Anchored and "ON" or "OFF"); for _, p in ipairs(selectedParts) do if p and p.Parent then p.Anchored = EditorState.Anchored end end end)
+collideBtn.MouseButton1Click:Connect(function() EditorState.CanCollide = not EditorState.CanCollide; collideBtn.Text = "Collide: " .. (EditorState.CanCollide and "ON" or "OFF"); for _, p in ipairs(selectedParts) do if p and p.Parent then p.CanCollide = EditorState.CanCollide end end end)
+
+tClearBtn.MouseButton1Click:Connect(function() Terrain:Clear(); terrainCodes = {} end)
+pDupBtn.MouseButton1Click:Connect(function()
+	local newS = {}
+	for _, p in ipairs(selectedParts) do if p and p.Parent == mapFolder then local c = p:Clone(); c.Parent = mapFolder; c.Position = c.Position + Vector3.new(0, c.Size.Y, 0); table.insert(newS, c) end end
+	if #newS > 0 then selectedParts = newS; setPTool("Move", pMoveBtn) end
+end)
+pDelBtn.MouseButton1Click:Connect(function() for _, p in ipairs(selectedParts) do if p and p.Parent == mapFolder then p:Destroy() end end; selectedParts = {}; updateSelectionVisuals() end)
+pClearBtn.MouseButton1Click:Connect(function() for _, p in ipairs(mapFolder:GetChildren()) do p:Destroy() end; selectedParts = {}; updateSelectionVisuals() end)
+pToTerrainBtn.MouseButton1Click:Connect(function()
+	for _, p in ipairs(selectedParts) do
+		if p and p.Parent == mapFolder then
+			local cf, sz, rot, mat = p.CFrame, p.Size, p.Orientation, EditorState.Material 
+			Terrain:FillBlock(cf, sz, mat); local mS = string.match(tostring(mat), "Enum.Material.(.+)")
+			table.insert(terrainCodes, string.format("Terrain:FillBlock(CFrame.new(%.1f,%.1f,%.1f) * CFrame.Angles(math.rad(%.1f),math.rad(%.1f),math.rad(%.1f)), Vector3.new(%.1f,%.1f,%.1f), Enum.Material.%s)", cf.X, cf.Y, cf.Z, rot.X, rot.Y, rot.Z, sz.X, sz.Y, sz.Z, mS))
+			p:Destroy()
+		end
+	end
+	selectedParts = {}; updateSelectionVisuals()
+end)
+
+-- ==========================================
+-- 7. FUNGSI INTI TERRAIN BRUSH
+-- ==========================================
+local function applyTerrainBrush(hitP)
+	local tMat = (EditorState.TerrainTool == "Erase") and Enum.Material.Air or EditorState.Material
+	local s, t = EditorState.BrushSize, math.max(0.1, EditorState.Thickness)
+	local tShape = EditorState.TerrainShape
+	local mS = string.match(tostring(tMat), "Enum.Material.(.+)")
+	
+	if EditorState.TerrainTool == "Island" then hitP = Vector3.new(hitP.X, hitP.Y + 30 + (t/2), hitP.Z) end
+	
+	if tShape == "Block" then
+		local cf = CFrame.new(hitP); local sz = (EditorState.TerrainTool == "Island") and Vector3.new(s, t, s) or Vector3.new(s, t, s)
+		Terrain:FillBlock(cf, sz, tMat)
+		table.insert(terrainCodes, string.format("Terrain:FillBlock(CFrame.new(%.1f,%.1f,%.1f), Vector3.new(%.1f,%.1f,%.1f), Enum.Material.%s)", cf.X, cf.Y, cf.Z, sz.X, sz.Y, sz.Z, mS))
+	elseif tShape == "Ball" then
+		local radius = s / 2
+		Terrain:FillBall(hitP, radius, tMat)
+		table.insert(terrainCodes, string.format("Terrain:FillBall(Vector3.new(%.1f,%.1f,%.1f), %.1f, Enum.Material.%s)", hitP.X, hitP.Y, hitP.Z, radius, mS))
+	elseif tShape == "Cone" then
+		spawnConeIsland(hitP, s, t, tMat)
+		table.insert(terrainCodes, string.format("spawnConeIsland(Vector3.new(%.1f,%.1f,%.1f), %.1f, %.1f, Enum.Material.%s)", hitP.X, hitP.Y, hitP.Z, s, t, mS))
+	end
+end
+
+-- ==========================================
+-- 8. UNIFIED SCREEN INPUT (KEYBIND & BRUSH)
+-- ==========================================
+local isPaintingTerrain = false
+local lastPaintPos = nil
+local isScreenSelecting = false
+local screenStartPos = Vector2.zero
+
+UserInputService.InputBegan:Connect(function(input, gP)
+	if not gP then
+		if input.KeyCode == Enum.KeyCode.Q then
+			mainFrame.Visible = not mainFrame.Visible
+			return
+		end
+	end
+
+	if gP or EditorState.Target == "None" then return end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		if EditorState.Target == "Terrain" then
+			isPaintingTerrain = true
+			applyTerrainBrush(mouse.Hit.Position)
+			lastPaintPos = mouse.Hit.Position
+			
+		elseif EditorState.Target == "Part" then
+			if EditorState.PartTool == "Select" then
+				isScreenSelecting = true
+				screenStartPos = Vector2.new(input.Position.X, input.Position.Y)
+				dragBox.Position = UDim2.new(0, screenStartPos.X, 0, screenStartPos.Y)
+				dragBox.Size = UDim2.new(0, 0, 0, 0)
+				dragBox.Visible = true
+				
+			elseif EditorState.PartTool == "Create" then 
+				local p = Instance.new(EditorState.Shape == "Wedge" and "WedgePart" or EditorState.Shape == "CornerWedge" and "CornerWedgePart" or "Part")
+				if p:IsA("Part") then p.Shape = Enum.PartType[EditorState.Shape] or Enum.PartType.Block end
+				p.Size = Vector3.new(EditorState.BrushSize, EditorState.BrushSize, EditorState.BrushSize); p.Position = mouse.Hit.Position + Vector3.new(0, p.Size.Y/2, 0)
+				p.Material, p.Transparency, p.Anchored, p.CanCollide, p.Parent = EditorState.Material, EditorState.Transparency, EditorState.Anchored, EditorState.CanCollide, mapFolder
+				selectedParts = {p}; setPTool("Move", pMoveBtn) 
+			end
+		end
+	end
+end)
+
+mouse.Move:Connect(function()
+	if isPaintingTerrain and EditorState.Target == "Terrain" then
+		local hitP = mouse.Hit.Position
+		local threshold = math.max(2, EditorState.BrushSize / 2)
+		if not lastPaintPos or (hitP - lastPaintPos).Magnitude >= threshold then
+			applyTerrainBrush(hitP)
+			lastPaintPos = hitP
+		end
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input, gP)
+	if isScreenSelecting and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+		local minX = math.min(screenStartPos.X, currentPos.X)
+		local minY = math.min(screenStartPos.Y, currentPos.Y)
+		local sizeX = math.abs(screenStartPos.X - currentPos.X)
+		local sizeY = math.abs(screenStartPos.Y - currentPos.Y)
+		
+		dragBox.Position = UDim2.new(0, minX, 0, minY)
+		dragBox.Size = UDim2.new(0, sizeX, 0, sizeY)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gP)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		isPaintingTerrain = false
+		lastPaintPos = nil
+		
+		if isScreenSelecting then
+			isScreenSelecting = false
+			dragBox.Visible = false
+			
+			local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+			local minX = math.min(screenStartPos.X, currentPos.X)
+			local maxX = math.max(screenStartPos.X, currentPos.X)
+			local minY = math.min(screenStartPos.Y, currentPos.Y)
+			local maxY = math.max(screenStartPos.Y, currentPos.Y)
+			
+			if (maxX - minX) > 10 and (maxY - minY) > 10 then
+				selectedParts = {} 
+				for _, p in ipairs(mapFolder:GetChildren()) do
+					if p:IsA("BasePart") then
+						local screenPos, onScreen = camera:WorldToViewportPoint(p.Position)
+						if onScreen then
+							if screenPos.X >= minX and screenPos.X <= maxX and screenPos.Y >= minY and screenPos.Y <= maxY then
+								table.insert(selectedParts, p)
+							end
+						end
+					end
+				end
+				updateSelectionVisuals()
+				
+			else
+				if mouse.Target and mouse.Target.Parent == mapFolder then 
+					local trgt = mouse.Target; local fI = table.find(selectedParts, trgt)
+					if fI then table.remove(selectedParts, fI) else table.insert(selectedParts, trgt) end
+					updateSelectionVisuals()
+				else 
+					selectedParts = {}; updateSelectionVisuals()
+				end
+			end
+		end
+	end
+end)
+
+-- ==========================================
+-- 9. GENERATE SCRIPT & SAVE LOGIC
+-- ==========================================
+local function getGeneratedScript()
+	local s = "local Terrain = workspace.Terrain\ntask.wait(1)\n\n" 
+	
+	local tCodesStr = table.concat(terrainCodes, "\n")
+	if string.find(tCodesStr, "spawnConeIsland") then
+		local coneFuncStr = [[
+local function spawnConeIsland(centerPosition, radius, thickness, baseMaterial)
+	local seed = tick() + math.random(1,1000)
+	local STEP = math.clamp(math.floor(radius / 15), 2, 6)
+	
+	local trueThick = math.max(0.1, thickness)
+	local SCALE_Y = math.clamp(trueThick / radius, 0.1, 5)
+	local BATAS_ATAS = trueThick * 0.2
+	local BATAS_BAWAH = -trueThick * 0.8
+	local KASAR = radius / 2
+	local NOISE_POWER = radius / 4
+	local isAir = (baseMaterial == Enum.Material.Air)
+
+	for x = -radius, radius, STEP do
+		if x % (STEP * 5) == 0 then task.wait() end
+		for y = BATAS_BAWAH, BATAS_ATAS, STEP do
+			for z = -radius, radius, STEP do
+				local pos = Vector3.new(x + centerPosition.X, y + centerPosition.Y, z + centerPosition.Z)
+				local offset = pos - centerPosition
+				local jarak = Vector3.new(offset.X, offset.Y * (1 / SCALE_Y), offset.Z).Magnitude
+				local noise = math.noise((x/KASAR) + seed, (y/KASAR) + seed, (z/KASAR) + seed) * NOISE_POWER
+
+				if jarak + noise <= radius then
+					local material = baseMaterial
+					if not isAir then
+						if y >= BATAS_ATAS - (STEP*1.5) then material = baseMaterial
+						elseif y <= BATAS_BAWAH + (STEP*2.5) then material = Enum.Material.Rock
+						else material = math.random() > 0.5 and Enum.Material.Ground or Enum.Material.Rock end
+					end
+					Terrain:FillBlock(CFrame.new(pos), Vector3.new(STEP, STEP, STEP), material)
+				end
+			end
+		end
+	end
+end
+]]
+		s = s .. "-- [ PROCEDURAL FUNCTIONS ] --\n" .. coneFuncStr .. "\n"
+	end
+
+	s = s .. "-- [ COLORS ] --\n" 
+	for mat, col in pairs(modifiedColors) do local mS = string.match(tostring(mat), "Enum.Material.(.+)"); s = s .. string.format("Terrain:SetMaterialColor(Enum.Material.%s, Color3.fromRGB(%d, %d, %d))\n", mS, math.round(col.R*255), math.round(col.G*255), math.round(col.B*255)) end
+	
+	s = s .. "\n-- [ TERRAIN ] --\n" .. tCodesStr .. "\n\n-- [ PARTS ] --\n"
+	for _, p in ipairs(mapFolder:GetChildren()) do
+		local rot, mS = p.Orientation, string.match(tostring(p.Material), "Enum.Material.(.+)")
+		local pC = string.format("local p = Instance.new('%s'); ", p.ClassName)
+		if p:IsA("Part") then pC = pC .. string.format("p.Shape = Enum.PartType.%s; ", string.match(tostring(p.Shape), "Enum.PartType.(.+)")) end
+		pC = pC .. string.format("p.Size = Vector3.new(%.1f,%.1f,%.1f); p.CFrame = CFrame.new(%.1f,%.1f,%.1f) * CFrame.Angles(math.rad(%.1f),math.rad(%.1f),math.rad(%.1f)); p.Material = Enum.Material.%s; p.Transparency = %.1f; p.Anchored = %s; p.CanCollide = %s; p.Parent = workspace", p.Size.X, p.Size.Y, p.Size.Z, p.Position.X, p.Position.Y, p.Position.Z, rot.X, rot.Y, rot.Z, mS, p.Transparency, tostring(p.Anchored), tostring(p.CanCollide))
+		s = s .. pC .. "\n"
+	end
+	
+	return s
+end
+
+generateBtn.MouseButton1Click:Connect(function()
+	outputBox.Text = getGeneratedScript()
+end)
+
+saveBtn.Text = "COPY & RESET SCRIPT"
+saveBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 80)
+
+saveBtn.MouseButton1Click:Connect(function()
+	local s = getGeneratedScript()
+	if type(setclipboard) == "function" then
+		pcall(function() setclipboard(s) end)
+	end
+	outputBox.Text = "-- KODE BERHASIL DI-COPY KE CLIPBOARD!\n-- Silakan paste di Notes atau script kamu.\n\n" .. s
+	terrainCodes = {}
+	modifiedColors = {}
+	for _, p in ipairs(mapFolder:GetChildren()) do 
+		if p:IsA("BasePart") then p:Destroy() end 
+	end
+	selectedParts = {}
+	updateSelectionVisuals()
+end)
+
+-- ==========================================
+-- 10. DRAG SYSTEM & TOGGLE LOGIC
+-- ==========================================
+local function makeDrag(g, a, t)
+	local dS, sP, iD = nil, nil, false
+	a.InputBegan:Connect(function(i) 
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dS = i.Position; sP = g.Position; iD = false end 
+	end)
+	a.InputChanged:Connect(function(i) 
+		if dS and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then if (i.Position - dS).Magnitude > 5 then iD = true; local d = i.Position - dS; g.Position = UDim2.new(sP.X.Scale, sP.X.Offset + d.X, sP.Y.Scale, sP.Y.Offset + d.Y) end end 
+	end)
+	a.InputEnded:Connect(function(i) 
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dS = nil end 
+	end)
+end
+
+makeDrag(mainFrame, titleFrame, false)
+
+toggleIcon.MouseButton1Click:Connect(function()
+    mainFrame.Visible = not mainFrame.Visible
+    toggleIcon.BackgroundTransparency = mainFrame.Visible and 0.5 or 0.85
+end)
