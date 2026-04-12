@@ -183,7 +183,7 @@ local iconImg = Instance.new("ImageLabel", toggleIcon)
 iconImg.Size = UDim2.new(0, 24, 0, 24)
 iconImg.Position = UDim2.new(0.5, -12, 0, 6)
 iconImg.BackgroundTransparency = 1
-iconImg.Image = "rbxassetid://6026568198" 
+iconImg.Image = "rbxassetid://17515140366" 
 
 local labelText = Instance.new("TextLabel", toggleIcon)
 labelText.Size = UDim2.new(1, 0, 0, 15)
