@@ -196,7 +196,7 @@ labelText.TextColor3 = Color3.new(0,0,0)
 
 task.spawn(function()
     while task.wait(0.5) do
-        local target = playerGui:FindFirstChild("GridToggle", true) or playerGui:FindFirstChild("toolbox", true) or playerGui:FindFirstChild("Rotate", true)
+        local target = playerGui:FindFirstChild("GridToggle", true) or playerGui:FindFirstChild("GridToolbox_V13_Perfect", true) or playerGui:FindFirstChild("Rotate", true)
         if target and target:IsA("GuiObject") then
             toggleIcon.Parent = target.Parent
             toggleIcon.Position = UDim2.new(0, target.Position.X.Offset + 46, 0, target.Position.Y.Offset)
