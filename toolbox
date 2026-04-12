@@ -79,7 +79,7 @@ local closeSide = Instance.new("TextButton", sideBox)
 closeSide.Size = UDim2.new(0, 20, 0, 20)
 closeSide.Position = UDim2.new(1, -22, 0, 2)
 closeSide.BackgroundTransparency = 1
-closeSide.Text = "✕"
+closeSide.Text = "×"
 closeSide.TextColor3 = Color3.fromRGB(255, 100, 100)
 closeSide.MouseButton1Click:Connect(function() sideBox.Visible = false end)
 
@@ -96,7 +96,7 @@ local title = Instance.new("TextLabel", header)
 title.Size = UDim2.new(1, -10, 1, 0)
 title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
-title.Text = "GRID TOOLBOX"
+title.Text = "TOOLBOX PC"
 title.TextColor3 = C_NEON_CYAN
 title.Font = Enum.Font.GothamBold
 title.TextSize = 11
@@ -131,7 +131,7 @@ task.spawn(function()
         local target = playerGui:FindFirstChild("toolbox", true) or playerGui:FindFirstChild("Rotate", true)
         if target and target:IsA("GuiObject") then
             topBarToggle.Parent = target.Parent
-            topBarToggle.Position = UDim2.new(0, target.Position.X.Offset + 46, 0, target.Position.Y.Offset)
+            topBarToggle.Position = UDim2.new(0, target.Position.X.Offset + 70, 0, target.Position.Y.Offset)
             break
         end
     end
