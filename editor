@@ -1,13 +1,11 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService") -- Ditambahkan untuk mengunci kamera secara paksa
 local Terrain = workspace.Terrain
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local camera = workspace.CurrentCamera
-
-local mapFolder = workspace:FindFirstChild("MyMapParts") or Instance.new("Folder")
-mapFolder.Name = "MyMapParts"
-mapFolder.Parent = workspace
 
 -- ==========================================
 -- 1. KONFIGURASI STATE UTAMA
@@ -146,7 +144,7 @@ local function updateSelectionVisuals()
 end
 
 -- ==========================================
--- 4. UI LANDSCAPE SYSTEM
+-- 4. UI LANDSCAPE SYSTEM & TRACKPAD
 -- ==========================================
 local guiName = "ProStudioClean"
 if playerGui:FindFirstChild(guiName) then playerGui[guiName]:Destroy() end
@@ -171,6 +169,63 @@ local function applyTheme(uiElement, isButton, isTransparentLabel, customRadius)
 	end
 	if isButton then uiElement.AutoButtonColor = true end
 end
+
+-- TRACKPAD (HOLD LAYAR)
+local trackpad = Instance.new("Frame", screenGui)
+trackpad.Name = "HoldTrackpad"
+trackpad.Size = UDim2.new(0, 70, 0, 70)
+trackpad.Position = UDim2.new(0, 20, 0.5, -25) -- Sebelah kiri layar
+trackpad.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+trackpad.BackgroundTransparency = 0.5
+trackpad.Active = true
+Instance.new("UICorner", trackpad).CornerRadius = UDim.new(0, 8)
+
+local tpLabel = Instance.new("TextLabel", trackpad)
+tpLabel.Size = UDim2.new(1, 0, 1, 0)
+tpLabel.BackgroundTransparency = 1
+tpLabel.Text = "HOLD"
+tpLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+tpLabel.Font = Enum.Font.GothamBold
+tpLabel.TextSize = 11
+
+local tpLockBtn = Instance.new("TextButton", trackpad)
+tpLockBtn.Size = UDim2.new(0, 18, 0, 18)
+tpLockBtn.Position = UDim2.new(1, -9, 0, -9) -- Pojok kanan atas trackpad
+tpLockBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+tpLockBtn.Text = "🔓"
+tpLockBtn.TextSize = 10
+Instance.new("UICorner", tpLockBtn).CornerRadius = UDim.new(1, 0)
+
+local tpLocked = false
+tpLockBtn.MouseButton1Click:Connect(function()
+	tpLocked = not tpLocked
+	tpLockBtn.Text = tpLocked and "🔒" or "🔓"
+	tpLockBtn.BackgroundColor3 = tpLocked and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(30, 30, 35)
+end)
+
+local tpDragging = false
+local tpDragStart = nil
+local tpStartPos = nil
+local holdInput = nil
+
+trackpad.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		holdInput = input
+		camera.CameraType = Enum.CameraType.Scriptable
+		local lockedCFrame = camera.CFrame -- Simpan posisi kamera saat ini
+		
+		-- Kunci mati kamera setiap frame agar usapan 2 jari tidak bisa menggerakkannya
+		RunService:BindToRenderStep("StudioLiteCamLock", Enum.RenderPriority.Camera.Value + 1, function()
+			camera.CFrame = lockedCFrame
+		end)
+		
+		if not tpLocked then
+			tpDragging = true
+			tpDragStart = input.Position
+			tpStartPos = trackpad.Position
+		end
+	end
+end)
 
 -- TOGGLE BUTTON
 local toggleIcon = Instance.new("TextButton", screenGui)
@@ -416,6 +471,9 @@ exitBtn.MouseButton1Click:Connect(function()
 	if scaleHandles then scaleHandles:Destroy() end
 	if rotHandles then rotHandles:Destroy() end
 	
+	pcall(function() RunService:UnbindFromRenderStep("StudioLiteCamLock") end)
+	camera.CameraType = Enum.CameraType.Custom
+	
 	for _, box in pairs(selectionBoxes) do
 		if box then box:Destroy() end
 	end
@@ -535,20 +593,43 @@ anchorBtn.MouseButton1Click:Connect(function() EditorState.Anchored = not Editor
 collideBtn.MouseButton1Click:Connect(function() EditorState.CanCollide = not EditorState.CanCollide; collideBtn.Text = "Collide: " .. (EditorState.CanCollide and "ON" or "OFF"); for _, p in ipairs(selectedParts) do if p and p.Parent then p.CanCollide = EditorState.CanCollide end end end)
 
 tClearBtn.MouseButton1Click:Connect(function() Terrain:Clear(); terrainCodes = {} end)
+
 pDupBtn.MouseButton1Click:Connect(function()
 	local newS = {}
-	for _, p in ipairs(selectedParts) do if p and p.Parent == mapFolder then local c = p:Clone(); c.Parent = mapFolder; c.Position = c.Position + Vector3.new(0, c.Size.Y, 0); table.insert(newS, c) end end
+	for _, p in ipairs(selectedParts) do 
+		if p and p.Parent then 
+			local c = p:Clone(); 
+			c.Parent = workspace; 
+			CollectionService:AddTag(c, "StudioLitePart") 
+			c.Position = c.Position + Vector3.new(0, c.Size.Y, 0); 
+			table.insert(newS, c) 
+		end 
+	end
 	if #newS > 0 then selectedParts = newS; setPTool("Move", pMoveBtn) end
 end)
-pDelBtn.MouseButton1Click:Connect(function() for _, p in ipairs(selectedParts) do if p and p.Parent == mapFolder then p:Destroy() end end; selectedParts = {}; updateSelectionVisuals() end)
-pClearBtn.MouseButton1Click:Connect(function() for _, p in ipairs(mapFolder:GetChildren()) do p:Destroy() end; selectedParts = {}; updateSelectionVisuals() end)
+
+pDelBtn.MouseButton1Click:Connect(function() 
+	for _, p in ipairs(selectedParts) do 
+		if p and CollectionService:HasTag(p, "StudioLitePart") then p:Destroy() end 
+	end; 
+	selectedParts = {}; updateSelectionVisuals() 
+end)
+
+pClearBtn.MouseButton1Click:Connect(function() 
+	for _, p in ipairs(CollectionService:GetTagged("StudioLitePart")) do p:Destroy() end; 
+	selectedParts = {}; updateSelectionVisuals() 
+end)
+
 pToTerrainBtn.MouseButton1Click:Connect(function()
 	for _, p in ipairs(selectedParts) do
-		if p and p.Parent == mapFolder then
+		if p and p.Parent then
 			local cf, sz, rot, mat = p.CFrame, p.Size, p.Orientation, EditorState.Material 
 			Terrain:FillBlock(cf, sz, mat); local mS = string.match(tostring(mat), "Enum.Material.(.+)")
 			table.insert(terrainCodes, string.format("Terrain:FillBlock(CFrame.new(%.1f,%.1f,%.1f) * CFrame.Angles(math.rad(%.1f),math.rad(%.1f),math.rad(%.1f)), Vector3.new(%.1f,%.1f,%.1f), Enum.Material.%s)", cf.X, cf.Y, cf.Z, rot.X, rot.Y, rot.Z, sz.X, sz.Y, sz.Z, mS))
-			p:Destroy()
+			
+			if CollectionService:HasTag(p, "StudioLitePart") then
+				p:Destroy()
+			end
 		end
 	end
 	selectedParts = {}; updateSelectionVisuals()
@@ -615,7 +696,8 @@ UserInputService.InputBegan:Connect(function(input, gP)
 				local p = Instance.new(EditorState.Shape == "Wedge" and "WedgePart" or EditorState.Shape == "CornerWedge" and "CornerWedgePart" or "Part")
 				if p:IsA("Part") then p.Shape = Enum.PartType[EditorState.Shape] or Enum.PartType.Block end
 				p.Size = Vector3.new(EditorState.BrushSize, EditorState.BrushSize, EditorState.BrushSize); p.Position = mouse.Hit.Position + Vector3.new(0, p.Size.Y/2, 0)
-				p.Material, p.Transparency, p.Anchored, p.CanCollide, p.Parent = EditorState.Material, EditorState.Transparency, EditorState.Anchored, EditorState.CanCollide, mapFolder
+				p.Material, p.Transparency, p.Anchored, p.CanCollide, p.Parent = EditorState.Material, EditorState.Transparency, EditorState.Anchored, EditorState.CanCollide, workspace
+				CollectionService:AddTag(p, "StudioLitePart") 
 				selectedParts = {p}; setPTool("Move", pMoveBtn) 
 			end
 		end
@@ -634,6 +716,14 @@ mouse.Move:Connect(function()
 end)
 
 UserInputService.InputChanged:Connect(function(input, gP)
+	if tpDragging and input == holdInput then
+		local delta = input.Position - tpDragStart
+		trackpad.Position = UDim2.new(
+			tpStartPos.X.Scale, tpStartPos.X.Offset + delta.X,
+			tpStartPos.Y.Scale, tpStartPos.Y.Offset + delta.Y
+		)
+	end
+	
 	if isScreenSelecting and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 		local currentPos = Vector2.new(input.Position.X, input.Position.Y)
 		local minX = math.min(screenStartPos.X, currentPos.X)
@@ -647,6 +737,14 @@ UserInputService.InputChanged:Connect(function(input, gP)
 end)
 
 UserInputService.InputEnded:Connect(function(input, gP)
+	-- LEPAS TRACKPAD
+	if input == holdInput then
+		pcall(function() RunService:UnbindFromRenderStep("StudioLiteCamLock") end)
+		camera.CameraType = Enum.CameraType.Custom
+		holdInput = nil
+		tpDragging = false
+	end
+	
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		isPaintingTerrain = false
 		lastPaintPos = nil
@@ -663,8 +761,8 @@ UserInputService.InputEnded:Connect(function(input, gP)
 			
 			if (maxX - minX) > 10 and (maxY - minY) > 10 then
 				selectedParts = {} 
-				for _, p in ipairs(mapFolder:GetChildren()) do
-					if p:IsA("BasePart") then
+				for _, p in ipairs(workspace:GetDescendants()) do
+					if p:IsA("BasePart") and not p:IsA("Terrain") then
 						local screenPos, onScreen = camera:WorldToViewportPoint(p.Position)
 						if onScreen then
 							if screenPos.X >= minX and screenPos.X <= maxX and screenPos.Y >= minY and screenPos.Y <= maxY then
@@ -676,7 +774,7 @@ UserInputService.InputEnded:Connect(function(input, gP)
 				updateSelectionVisuals()
 				
 			else
-				if mouse.Target and mouse.Target.Parent == mapFolder then 
+				if mouse.Target and mouse.Target:IsA("BasePart") and not mouse.Target:IsA("Terrain") then 
 					local trgt = mouse.Target; local fI = table.find(selectedParts, trgt)
 					if fI then table.remove(selectedParts, fI) else table.insert(selectedParts, trgt) end
 					updateSelectionVisuals()
@@ -739,7 +837,7 @@ end
 	for mat, col in pairs(modifiedColors) do local mS = string.match(tostring(mat), "Enum.Material.(.+)"); s = s .. string.format("Terrain:SetMaterialColor(Enum.Material.%s, Color3.fromRGB(%d, %d, %d))\n", mS, math.round(col.R*255), math.round(col.G*255), math.round(col.B*255)) end
 	
 	s = s .. "\n-- [ TERRAIN ] --\n" .. tCodesStr .. "\n\n-- [ PARTS ] --\n"
-	for _, p in ipairs(mapFolder:GetChildren()) do
+	for _, p in ipairs(CollectionService:GetTagged("StudioLitePart")) do
 		local rot, mS = p.Orientation, string.match(tostring(p.Material), "Enum.Material.(.+)")
 		local pC = string.format("local p = Instance.new('%s'); ", p.ClassName)
 		if p:IsA("Part") then pC = pC .. string.format("p.Shape = Enum.PartType.%s; ", string.match(tostring(p.Shape), "Enum.PartType.(.+)")) end
@@ -765,7 +863,7 @@ saveBtn.MouseButton1Click:Connect(function()
 	outputBox.Text = "-- KODE BERHASIL DI-COPY KE CLIPBOARD!\n-- Silakan paste di Notes atau script kamu.\n\n" .. s
 	terrainCodes = {}
 	modifiedColors = {}
-	for _, p in ipairs(mapFolder:GetChildren()) do 
+	for _, p in ipairs(CollectionService:GetTagged("StudioLitePart")) do 
 		if p:IsA("BasePart") then p:Destroy() end 
 	end
 	selectedParts = {}
