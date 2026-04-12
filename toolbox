@@ -19,7 +19,7 @@ local C_TEXT = Color3.fromRGB(255, 255, 255)
 -- ==========================================
 -- SETUP UI UTAMA
 -- ==========================================
-local guiName = "GridToolbox_V13_Perfect"
+local guiName = "GridToggle"
 if playerGui:FindFirstChild(guiName) then playerGui[guiName]:Destroy() end
 
 local studioGui = Instance.new("ScreenGui", playerGui)
@@ -128,7 +128,7 @@ label.TextColor3 = Color3.new(0,0,0)
 
 task.spawn(function()
     while task.wait(0.5) do
-        local target = playerGui:FindFirstChild("toolbox", true) or playerGui:FindFirstChild("Rotate", true)
+        local target = playerGui:FindFirstChild("Snap", true) or playerGui:FindFirstChild("Rotate", true)
         if target and target:IsA("GuiObject") then
             topBarToggle.Parent = target.Parent
             topBarToggle.Position = UDim2.new(0, target.Position.X.Offset + 70, 0, target.Position.Y.Offset)
