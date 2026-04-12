@@ -180,6 +180,7 @@ toggleIcon.Position = UDim2.new(0, 200, 0, 0)
 toggleIcon.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 toggleIcon.BackgroundTransparency = 0
 toggleIcon.BorderColor3 = Color3.fromRGB(255, 0, 0)
+toggleIcon.BorderSizePixel = 1
 toggleIcon.Text = ""
 
 local iconImg = Instance.new("ImageLabel", toggleIcon)
