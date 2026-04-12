@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local AssetService = game:GetService("AssetService")
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local playerGui = player:WaitForChild("PlayerGui")
@@ -16,9 +17,9 @@ local C_NEON_CYAN = Color3.fromRGB(0, 210, 255)
 local C_TEXT = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- SETUP UI UTAMA (REVISI POSISI TENGAH)
+-- SETUP UI UTAMA
 -- ==========================================
-local guiName = "GridToolbox_V6_Final"
+local guiName = "GridToolbox_V13_Perfect"
 if playerGui:FindFirstChild(guiName) then playerGui[guiName]:Destroy() end
 
 local studioGui = Instance.new("ScreenGui", playerGui)
@@ -27,19 +28,81 @@ studioGui.ResetOnSpawn = false
 
 local mainFrame = Instance.new("Frame", studioGui)
 mainFrame.Size = UDim2.new(0, 260, 0, 360)
--- REVISI: Posisi Y diubah ke -180 agar lebih ke atas (tengah layar)
-mainFrame.Position = UDim2.new(0.5, -130, 0.5, -180) 
+mainFrame.Position = UDim2.new(0.5, -230, 0.5, -180) 
 mainFrame.BackgroundColor3 = C_BG
 mainFrame.BorderSizePixel = 0
 mainFrame.Visible = false
-mainFrame.ClipsDescendants = true
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
 
 -- ==========================================
--- TOGGLE BUTTON
+-- SIDE BOX (ACTION MENU UNTUK AUDIO)
 -- ==========================================
+local sideBox = Instance.new("Frame", studioGui)
+sideBox.Size = UDim2.new(0, 120, 0, 160)
+sideBox.Position = UDim2.new(0.5, 40, 0.5, -80) 
+sideBox.BackgroundColor3 = C_BG_LIGHT
+sideBox.BorderSizePixel = 0
+sideBox.Visible = false
+Instance.new("UICorner", sideBox).CornerRadius = UDim.new(0, 8)
+
+local sideTitle = Instance.new("TextLabel", sideBox)
+sideTitle.Size = UDim2.new(1, -10, 0, 40)
+sideTitle.Position = UDim2.new(0, 5, 0, 5)
+sideTitle.BackgroundTransparency = 1
+sideTitle.Text = "Audio Name"
+sideTitle.TextColor3 = C_NEON_CYAN
+sideTitle.Font = Enum.Font.GothamBold
+sideTitle.TextSize = 10
+sideTitle.TextWrapped = true
+
+local copyIdBtn = Instance.new("TextButton", sideBox)
+copyIdBtn.Size = UDim2.new(1, -16, 0, 35)
+copyIdBtn.Position = UDim2.new(0, 8, 0, 55)
+copyIdBtn.BackgroundColor3 = C_BG_ITEM
+copyIdBtn.Text = "Copy ID"
+copyIdBtn.TextColor3 = C_TEXT
+copyIdBtn.Font = Enum.Font.GothamBold
+copyIdBtn.TextSize = 11
+Instance.new("UICorner", copyIdBtn).CornerRadius = UDim.new(0, 6)
+
+local downloadBtn = Instance.new("TextButton", sideBox)
+downloadBtn.Size = UDim2.new(1, -16, 0, 35)
+downloadBtn.Position = UDim2.new(0, 8, 0, 100)
+downloadBtn.BackgroundColor3 = C_NEON_CYAN
+downloadBtn.Text = "Download"
+downloadBtn.TextColor3 = C_BG
+downloadBtn.Font = Enum.Font.GothamBold
+downloadBtn.TextSize = 11
+Instance.new("UICorner", downloadBtn).CornerRadius = UDim.new(0, 6)
+
+local closeSide = Instance.new("TextButton", sideBox)
+closeSide.Size = UDim2.new(0, 20, 0, 20)
+closeSide.Position = UDim2.new(1, -22, 0, 2)
+closeSide.BackgroundTransparency = 1
+closeSide.Text = "✕"
+closeSide.TextColor3 = Color3.fromRGB(255, 100, 100)
+closeSide.MouseButton1Click:Connect(function() sideBox.Visible = false end)
+
+-- ==========================================
+-- HEADER & TOGGLE BUTTON
+-- ==========================================
+local header = Instance.new("Frame", mainFrame)
+header.Size = UDim2.new(1, 0, 0, 35)
+header.BackgroundColor3 = C_BG_LIGHT
+header.BorderSizePixel = 0
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel", header)
+title.Size = UDim2.new(1, -10, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "GRID TOOLBOX"
+title.TextColor3 = C_NEON_CYAN
+title.Font = Enum.Font.GothamBold
+title.TextSize = 11
+title.TextXAlignment = Enum.TextXAlignment.Left
+
 local topBarToggle = Instance.new("TextButton", studioGui)
-topBarToggle.Name = "GridToggle"
 topBarToggle.Size = UDim2.new(0, 42, 0, 50)
 topBarToggle.Position = UDim2.new(0, 400, 0, 0) 
 topBarToggle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -63,52 +126,87 @@ label.TextSize = 9
 label.Font = Enum.Font.SourceSansBold
 label.TextColor3 = Color3.new(0,0,0)
 
--- Logika Penempatan: Geser ke kanan dari tombol toolbox
 task.spawn(function()
     while task.wait(0.5) do
-        local target = playerGui:FindFirstChild("Snap", true) or playerGui:FindFirstChild("Rotate", true)
+        local target = playerGui:FindFirstChild("toolbox", true) or playerGui:FindFirstChild("Rotate", true)
         if target and target:IsA("GuiObject") then
             topBarToggle.Parent = target.Parent
-            -- REVISI: Offset diubah jadi +46 agar bergeser ke KANAN
-            topBarToggle.Position = UDim2.new(0, target.Position.X.Offset + 70, 0, target.Position.Y.Offset)
+            topBarToggle.Position = UDim2.new(0, target.Position.X.Offset + 46, 0, target.Position.Y.Offset)
             break
         end
     end
 end)
 
 -- ==========================================
--- HEADER (DRAG HANDLE)
+-- SEARCH BAR & DROPDOWN LOGIC
 -- ==========================================
-local header = Instance.new("Frame", mainFrame)
-header.Size = UDim2.new(1, 0, 0, 35)
-header.BackgroundColor3 = C_BG_LIGHT
-header.BorderSizePixel = 0
+local searchMode = "Model"
 
-local title = Instance.new("TextLabel", header)
-title.Size = UDim2.new(1, -10, 1, 0)
-title.Position = UDim2.new(0, 10, 0, 0)
-title.BackgroundTransparency = 1
-title.Text = "TOOLBOX PC"
-title.TextColor3 = C_NEON_CYAN
-title.Font = Enum.Font.GothamBold
-title.TextSize = 11
-title.TextXAlignment = Enum.TextXAlignment.Left
-
--- ==========================================
--- SEARCH AREA & LOADING (FIX LOADING)
--- ==========================================
 local searchFrame = Instance.new("Frame", mainFrame)
 searchFrame.Size = UDim2.new(1, -16, 0, 30)
 searchFrame.Position = UDim2.new(0, 8, 0, 42)
 searchFrame.BackgroundColor3 = C_BG_LIGHT
 Instance.new("UICorner", searchFrame).CornerRadius = UDim.new(0, 5)
 
+local dropBtn = Instance.new("TextButton", searchFrame)
+dropBtn.Size = UDim2.new(0, 65, 1, 0)
+dropBtn.BackgroundColor3 = C_BG_ITEM
+dropBtn.Text = "Model ▼"
+dropBtn.TextColor3 = C_NEON_CYAN
+dropBtn.Font = Enum.Font.GothamBold
+dropBtn.TextSize = 10
+Instance.new("UICorner", dropBtn).CornerRadius = UDim.new(0, 5)
+
+local dropMenu = Instance.new("Frame", mainFrame)
+dropMenu.Size = UDim2.new(0, 65, 0, 50)
+dropMenu.Position = UDim2.new(0, 8, 0, 75)
+dropMenu.BackgroundColor3 = C_BG_ITEM
+dropMenu.ZIndex = 50
+dropMenu.Visible = false
+Instance.new("UICorner", dropMenu).CornerRadius = UDim.new(0, 5)
+
+local optModel = Instance.new("TextButton", dropMenu)
+optModel.Size = UDim2.new(1, 0, 0, 25)
+optModel.BackgroundTransparency = 1
+optModel.Text = "Model"
+optModel.TextColor3 = C_TEXT
+optModel.Font = Enum.Font.Gotham
+optModel.TextSize = 10
+optModel.ZIndex = 51
+
+local optAudio = Instance.new("TextButton", dropMenu)
+optAudio.Size = UDim2.new(1, 0, 0, 25)
+optAudio.Position = UDim2.new(0, 0, 0, 25)
+optAudio.BackgroundTransparency = 1
+optAudio.Text = "Audio"
+optAudio.TextColor3 = C_TEXT
+optAudio.Font = Enum.Font.Gotham
+optAudio.TextSize = 10
+optAudio.ZIndex = 51
+
+dropBtn.MouseButton1Click:Connect(function() 
+    dropMenu.Visible = not dropMenu.Visible 
+end)
+
+optModel.MouseButton1Click:Connect(function() 
+    searchMode = "Model"
+    dropBtn.Text = "Model ▼"
+    dropMenu.Visible = false
+    sideBox.Visible = false
+end)
+
+optAudio.MouseButton1Click:Connect(function() 
+    searchMode = "Audio"
+    dropBtn.Text = "Audio ▼"
+    dropMenu.Visible = false
+end)
+
 local searchBox = Instance.new("TextBox", searchFrame)
-searchBox.Size = UDim2.new(1, -35, 1, 0)
-searchBox.Position = UDim2.new(0, 8, 0, 0)
+searchBox.Size = UDim2.new(1, -100, 1, 0)
+searchBox.Position = UDim2.new(0, 70, 0, 0)
 searchBox.BackgroundTransparency = 1
 searchBox.TextColor3 = C_TEXT
-searchBox.PlaceholderText = "Search models..."
+searchBox.PlaceholderText = "Search..."
 searchBox.Text = ""
 searchBox.TextSize = 11
 searchBox.Font = Enum.Font.Gotham
@@ -130,14 +228,11 @@ loadingLabel.Font = Enum.Font.Gotham
 loadingLabel.TextSize = 10
 loadingLabel.Visible = false
 
--- Efek Blink Loading
 task.spawn(function()
     while true do
         if loadingLabel.Visible then
-            loadingLabel.TextTransparency = 0.3
-            task.wait(0.4)
-            loadingLabel.TextTransparency = 0.8
-            task.wait(0.4)
+            loadingLabel.TextTransparency = 0.3; task.wait(0.4)
+            loadingLabel.TextTransparency = 0.8; task.wait(0.4)
         else
             task.wait(0.2)
         end
@@ -152,7 +247,6 @@ gridArea.Size = UDim2.new(1, -16, 1, -90)
 gridArea.Position = UDim2.new(0, 8, 0, 80)
 gridArea.BackgroundTransparency = 1
 gridArea.ScrollBarThickness = 3
-gridArea.ScrollBarImageColor3 = C_NEON_CYAN
 gridArea.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 local gridLayout = Instance.new("UIGridLayout", gridArea)
@@ -160,40 +254,42 @@ gridLayout.CellSize = UDim2.new(0, 56, 0, 70)
 gridLayout.CellPadding = UDim2.new(0, 5, 0, 5)
 
 -- ==========================================
--- LOGIKA FETCH (SAMA - DENGAN FIX LOADING)
+-- FETCH & API LOGIC
 -- ==========================================
 local function getAssetInfo(assetId)
     local success, response = pcall(function()
-        return type(request) == "function" and request({Url = "https://economy.roblox.com/v2/assets/" .. assetId .. "/details", Method = "GET"}).Body or game:HttpGet("https://economy.roblox.com/v2/assets/" .. assetId .. "/details")
+        if type(request) == "function" then
+            return request({Url = "https://economy.roblox.com/v2/assets/" .. assetId .. "/details", Method = "GET"}).Body
+        else
+            return game:HttpGet("https://economy.roblox.com/v2/assets/" .. assetId .. "/details")
+        end
     end)
     if success and response then
         local data = HttpService:JSONDecode(response)
-        return {id = assetId, name = data.Name or "Asset", icon = assetId}
+        return {id = assetId, name = data.Name or "Model", icon = assetId}
     end
-    return {id = assetId, name = "Asset", icon = assetId}
+    return {id = assetId, name = "Model", icon = assetId}
 end
 
 local function fetchModels(keyword)
-    -- REVISI: Loading diaktifkan dengan task.wait() agar sempat muncul
-    loadingLabel.Visible = true
-    gridArea.Visible = false
-    task.wait(0.1) 
-    
-    local url = "https://apis.roblox.com/toolbox-service/v1/marketplace/10?limit=50&keyword=" .. HttpService:UrlEncode(keyword)
+    local url = "https://apis.roblox.com/toolbox-service/v1/marketplace/10?limit=25&keyword=" .. HttpService:UrlEncode(keyword)
     local success, response = pcall(function()
-        return type(request) == "function" and request({Url = url, Method = "GET"}).Body or game:HttpGet(url)
+        if type(request) == "function" then
+            return request({Url = url, Method = "GET"}).Body
+        else
+            return game:HttpGet(url)
+        end
     end)
-    
-    loadingLabel.Visible = false
-    gridArea.Visible = true
     
     if success and response then
         local decoded = HttpService:JSONDecode(response)
         if decoded and decoded.data then
             local res = {}
             for i, item in ipairs(decoded.data) do
-                table.insert(res, getAssetInfo(item.id))
-                if i % 6 == 0 then task.wait() end
+                if item.id then
+                    table.insert(res, getAssetInfo(item.id))
+                end
+                if i % 6 == 0 then task.wait() end 
             end
             return res
         end
@@ -201,74 +297,163 @@ local function fetchModels(keyword)
     return nil
 end
 
-local function displayGrid(items)
+local function fetchAudio(keyword)
+    local params = Instance.new("AudioSearchParams")
+    params.SearchKeyword = keyword
+    local success, res = pcall(function() return AssetService:SearchAudioAsync(params) end)
+    
+    if success and res then
+        local list = {}
+        for i, v in ipairs(res:GetCurrentPage()) do 
+            table.insert(list, {id = v.Id, name = v.Title}) 
+            if i % 6 == 0 then task.wait() end
+        end
+        return list
+    end
+    return nil
+end
+
+-- ==========================================
+-- PREVIEW & SIDEBOX LOGIC
+-- ==========================================
+local currentSound = nil
+local activeAudioData = nil
+
+local function stopPreview()
+    if currentSound then 
+        currentSound:Stop()
+        currentSound:Destroy()
+        currentSound = nil
+    end
+end
+
+local function playPreview(id)
+    stopPreview()
+    currentSound = Instance.new("Sound", playerGui)
+    currentSound.SoundId = "rbxassetid://" .. id
+    currentSound:Play()
+end
+
+local function updateSideBox(item)
+    activeAudioData = item
+    sideTitle.Text = item.name
+    sideBox.Visible = true
+end
+
+copyIdBtn.MouseButton1Click:Connect(function()
+    if activeAudioData and setclipboard then
+        setclipboard(tostring(activeAudioData.id))
+        copyIdBtn.Text = "Copied!"
+        task.wait(1)
+        copyIdBtn.Text = "Copy ID"
+    end
+end)
+
+downloadBtn.MouseButton1Click:Connect(function()
+    if activeAudioData then
+        local s = Instance.new("Sound", workspace)
+        s.Name = activeAudioData.name
+        s.SoundId = "rbxassetid://" .. activeAudioData.id
+        print("[Studio Lite] Audio didownload ke workspace: " .. activeAudioData.name)
+    end
+end)
+
+-- ==========================================
+-- RENDER GRID (THUMBNAIL DIPERBAIKI)
+-- ==========================================
+local function displayGrid(items, mode)
     for _, v in ipairs(gridArea:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
     if not items then return end
+    
     for _, item in ipairs(items) do
         local btn = Instance.new("TextButton", gridArea)
-        btn.BackgroundColor3 = C_BG_ITEM
-        btn.Text = ""
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+        btn.BackgroundColor3 = C_BG_ITEM; btn.Text = ""
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+        
         local thumb = Instance.new("ImageLabel", btn)
-        thumb.Size = UDim2.new(1, -6, 0, 45)
-        thumb.Position = UDim2.new(0, 3, 0, 3)
-        thumb.Image = "rbxthumb://type=Asset&id=" .. item.icon .. "&w=150&h=150"
+        thumb.Size = UDim2.new(1, -8, 0, 45); thumb.Position = UDim2.new(0, 4, 0, 4)
+        
+        -- MENGGUNAKAN RBXTHUMB UNTUK KEDUANYA (Model & Audio)
+        thumb.Image = "rbxthumb://type=Asset&id=" .. item.id .. "&w=150&h=150"
+        
         thumb.BackgroundTransparency = 1
-        Instance.new("UICorner", thumb).CornerRadius = UDim.new(0, 3)
+        Instance.new("UICorner", thumb).CornerRadius = UDim.new(0, 4)
+
         local txt = Instance.new("TextLabel", btn)
-        txt.Size = UDim2.new(1, -4, 0, 15)
-        txt.Position = UDim2.new(0, 2, 1, -18)
-        txt.Text = item.name
-        txt.TextColor3 = C_TEXT
-        txt.TextSize = 7
-        txt.Font = Enum.Font.Gotham
-        txt.BackgroundTransparency = 1
-        txt.TextWrapped = true
+        txt.Size = UDim2.new(1, -4, 0, 18); txt.Position = UDim2.new(0, 2, 1, -20)
+        txt.Text = item.name; txt.TextColor3 = C_TEXT; txt.TextSize = 7
+        txt.BackgroundTransparency = 1; txt.TextWrapped = true
+
         btn.MouseButton1Click:Connect(function()
-            pcall(function()
-                local obj = game:GetObjects("rbxassetid://" .. item.id)[1]
-                obj.Parent = workspace
-                obj:MoveTo(mouse.Hit.Position)
-            end)
+            if mode == "Model" then
+                pcall(function()
+                    local obj = game:GetObjects("rbxassetid://" .. item.id)[1]
+                    obj.Parent = workspace; obj:MoveTo(mouse.Hit.Position)
+                end)
+            else
+                playPreview(item.id)
+                updateSideBox(item)
+            end
         end)
     end
     gridArea.CanvasSize = UDim2.new(0, 0, 0, gridLayout.AbsoluteContentSize.Y + 10)
 end
 
 -- ==========================================
--- SISTEM DRAG
+-- EXECUTE SEARCH LOGIC
+-- ==========================================
+local function doSearch()
+    dropMenu.Visible = false
+    sideBox.Visible = false
+    loadingLabel.Visible = true
+    gridArea.Visible = false
+    task.wait(0.1) 
+    
+    local res
+    if searchMode == "Model" then
+        res = fetchModels(searchBox.Text)
+    elseif searchMode == "Audio" then
+        res = fetchAudio(searchBox.Text)
+    end
+    
+    displayGrid(res, searchMode)
+    loadingLabel.Visible = false
+    gridArea.Visible = true
+end
+
+searchBtn.MouseButton1Click:Connect(doSearch)
+searchBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then doSearch() end
+end)
+
+-- ==========================================
+-- SYNC DRAG SYSTEM
 -- ==========================================
 local function enableDrag(frame, handle)
     local dragging, dragStart, startPos
     handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true; dragStart = input.Position; startPos = frame.Position
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = input.Position - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            frame.Position = newPos
+            sideBox.Position = newPos + UDim2.new(0, 270, 0, 100)
         end
     end)
+    UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
 end
 
 enableDrag(mainFrame, header)
 
--- ==========================================
--- ACTION EVENTS
--- ==========================================
-searchBtn.MouseButton1Click:Connect(function()
-    local res = fetchModels(searchBox.Text)
-    displayGrid(res)
-end)
-
 topBarToggle.MouseButton1Click:Connect(function()
     mainFrame.Visible = not mainFrame.Visible
     topBarToggle.BackgroundTransparency = mainFrame.Visible and 0.5 or 0.85
+    if not mainFrame.Visible then 
+        sideBox.Visible = false 
+        stopPreview()
+    end
 end)
