@@ -272,7 +272,7 @@ local function getAssetInfo(assetId)
 end
 
 local function fetchModels(keyword)
-    local url = "https://apis.roblox.com/toolbox-service/v1/marketplace/10?limit=25&keyword=" .. HttpService:UrlEncode(keyword)
+    local url = "https://apis.roblox.com/toolbox-service/v1/marketplace/10?limit=55&keyword=" .. HttpService:UrlEncode(keyword)
     local success, response = pcall(function()
         if type(request) == "function" then
             return request({Url = url, Method = "GET"}).Body
